@@ -12,7 +12,7 @@
 #endif
 
 #ifndef OTYPE
-#define OTYPE fp32
+#define OTYPE fp16
 #endif
 
 typedef struct {

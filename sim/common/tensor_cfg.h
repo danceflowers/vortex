@@ -110,9 +110,11 @@ private:
   static constexpr uint32_t tile_em = lg_tile_cap - tile_en;
 
   static constexpr uint32_t block_cap = NT;
-  static constexpr uint32_t lg_block_cap = clog2(block_cap);
-  static constexpr uint32_t block_en = lg_block_cap / 2;
-  static constexpr uint32_t block_em = lg_block_cap - block_en;
+  static constexpr uint32_t packed_fp16_output = std::is_same<Ot, fp16>::value;
+  static constexpr uint32_t output_cap = packed_fp16_output ? (NT * 2) : NT;
+  static constexpr uint32_t lg_output_cap = clog2(output_cap);
+  static constexpr uint32_t block_en = lg_output_cap / 2;
+  static constexpr uint32_t block_em = lg_output_cap - block_en;
 
 public:
 
@@ -127,7 +129,7 @@ public:
 
   static constexpr uint32_t tcM = 1u << block_em;
   static constexpr uint32_t tcN = 1u << block_en;
-  static constexpr uint32_t tcK = (DP != 0) ? DP : (block_cap / ((tcM > tcN) ? tcM : tcN));
+  static constexpr uint32_t tcK = (DP != 0) ? DP : (NT / ((tcM > tcN) ? tcM : tcN));
 
   static constexpr uint32_t m_steps = xtileM / tcM;  // number of M steps per register
   static constexpr uint32_t n_steps = xtileN / tcN;  // number of N steps per register
@@ -143,7 +145,7 @@ public:
 
   static constexpr uint32_t NRA = (xtileM * xtileK) / NT; // Number of A registers
   static constexpr uint32_t NRB = (xtileN * xtileK) / NT; // Number of B registers
-  static constexpr uint32_t NRC = (xtileM * xtileN) / NT; // Number of C registers
+  static constexpr uint32_t NRC = (xtileM * xtileN) / (NT * o_ratio); // Number of C registers
 
   static_assert((m_steps / a_sub_blocks) != 0, "tcK is too small for tile A");
   static_assert((n_steps / b_sub_blocks) != 0, "tcK is too small for tile B");
@@ -154,7 +156,7 @@ public:
 
   static_assert((tcM * tcK <= block_cap), "tcM * tcK <= block_cap");
   static_assert((tcN * tcK <= block_cap), "tcN * tcK <= block_cap");
-  static_assert((tcM * tcN <= block_cap), "tcM * tcN <= block_cap");
+  static_assert(((tcM * tcN) / o_ratio <= block_cap), "(tcM * tcN) / o_ratio <= block_cap");
 
   static_assert((xtileM % tcM) == 0, "M,m divisibility");
   static_assert((xtileN % tcN) == 0, "N,n divisibility");

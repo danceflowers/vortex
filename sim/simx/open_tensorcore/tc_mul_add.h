@@ -4,7 +4,7 @@
 #include "fp_types.h"
 #include "tc_mul_pipe.h"
 #include "tc_add_pipe.h"
-#include "fp22_to_fp8.h"
+#include "fp22_to_fp16.h"
 struct tc_mul_add{
 std::array<mul_pipe, 8> mul_array;
 std::array<add_pipe, 4> add_level0;
@@ -101,7 +101,7 @@ r6_valid &= final_add.out_valid();
 if (s7_ready){
 if (r6_valid){
 uint32_t fp22 = final_add.out_data();
-r2.result = fp22_to_fp8(fp22);
+r2.result = fp22_to_fp16(fp22);
 r2.valid = true;
     }else{
 r2.valid = false;
