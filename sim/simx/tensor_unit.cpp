@@ -16,6 +16,7 @@
 #include "tensor_cfg.h"
 #include <rvfloats.h>
 #include "core.h"
+#include "open_tensorcore/tensor_core_top.h"
 
 using namespace vortex;
 
@@ -24,6 +25,21 @@ using cfg = vt::wmma_config_t<NUM_THREADS>;
 
 inline uint64_t nan_box(uint32_t value) {
   return value | 0xffffffff00000000;
+}
+
+
+inline uint16_t unpack_fp16_lane(uint32_t word, uint32_t lane) {
+  return (word >> (lane * 16)) & 0xffff;
+}
+
+inline uint32_t pack_fp16_lanes(uint16_t lo, uint16_t hi) {
+  return static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 16);
+}
+
+inline bool use_open_tensorcore(uint32_t fmt_s, uint32_t fmt_d) {
+  if (fmt_d != vt::fp16::id)
+    return false;
+  return (fmt_s == vt::fp16::id || fmt_s == vt::int8::id || fmt_s == vt::uint8::id || fmt_s == vt::int4::id || fmt_s == vt::uint4::id);
 }
 
 template <typename It, typename Ot>
@@ -248,6 +264,69 @@ public:
             ExeTraceData* trace_data) {
     __unused(wid);
     __unused(trace_data);
+
+    if (use_open_tensorcore(fmt_s, fmt_d)) {
+      static constexpr uint32_t tcM = 8;
+      static constexpr uint32_t tcN = 8;
+      static constexpr uint32_t tcK_words = 4;
+      uint16_t A[8][8] = {};
+      uint16_t B[8][8] = {};
+      uint32_t C[8][8] = {};
+
+      uint32_t a_off = (step_m % (cfg::a_sub_blocks == 0 ? 1 : cfg::a_sub_blocks)) * (tcM * tcK_words);
+      uint32_t b_off = (step_n % (cfg::b_sub_blocks == 0 ? 1 : cfg::b_sub_blocks)) * (tcN * tcK_words);
+
+      for (uint32_t i = 0; i < tcM; ++i) {
+        for (uint32_t z = 0; z < tcK_words; ++z) {
+          auto a_word = rs1_data.at(a_off + i * tcK_words + z).u32;
+          A[i][2 * z + 0] = unpack_fp16_lane(a_word, 0);
+          A[i][2 * z + 1] = unpack_fp16_lane(a_word, 1);
+        }
+      }
+      for (uint32_t j = 0; j < tcN; ++j) {
+        for (uint32_t z = 0; z < tcK_words; ++z) {
+          auto b_word = rs2_data.at(b_off + j * tcK_words + z).u32;
+          B[2 * z + 0][j] = unpack_fp16_lane(b_word, 0);
+          B[2 * z + 1][j] = unpack_fp16_lane(b_word, 1);
+        }
+      }
+      for (uint32_t i = 0; i < tcM; ++i) {
+        for (uint32_t j = 0; j < tcN; ++j) {
+          uint32_t elem = i * tcN + j;
+          uint32_t word = elem / 2;
+          uint32_t lane = elem % 2;
+          auto c_word = rs3_data.at(word).u32;
+          C[i][j] = unpack_fp16_lane(c_word, lane);
+        }
+      }
+
+      TensorCoreTop tc;
+      tc.reset();
+      tc.load_inputs(A, B, C);
+
+      bool done = false;
+      for (uint32_t cycle = 0; cycle < 128 && !done; ++cycle) {
+        tc.tick(true);
+        if (cycle == 0) {
+          tc.load_invalid();
+        }
+        done = true;
+        for (uint32_t i = 0; i < tcM && done; ++i) {
+          for (uint32_t j = 0; j < tcN && done; ++j) {
+            done = tc.tc_dot_product[i][j].out_valid();
+          }
+        }
+      }
+
+      for (uint32_t word = 0; word < 32; ++word) {
+        uint32_t elem0 = 2 * word;
+        uint32_t elem1 = elem0 + 1;
+        uint16_t d0 = tc.d_out[elem0 / tcN][elem0 % tcN];
+        uint16_t d1 = tc.d_out[elem1 / tcN][elem1 % tcN];
+        rd_data.at(word).u64 = nan_box(pack_fp16_lanes(d0, d1));
+      }
+      return;
+    }
 
     auto fedp = select_FEDP(fmt_s, fmt_d);
 

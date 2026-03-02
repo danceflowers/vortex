@@ -118,6 +118,19 @@ build_driver() {
     fi
 }
 
+
+self_check_softfloat() {
+    if [ ! -f "$ROOT_DIR/third_party/softfloat/source/include/softfloat_types.h" ]; then
+        echo "SoftFloat header missing, running: git submodule update --init --recursive third_party/softfloat"
+        git -C "$ROOT_DIR" submodule update --init --recursive third_party/softfloat
+    fi
+
+    if [ ! -f "$ROOT_DIR/third_party/softfloat/build/Linux-x86_64-GCC/softfloat.a" ]; then
+        echo "SoftFloat library missing, running: make -C third_party softfloat -j"
+        make -C "$ROOT_DIR/third_party" softfloat -j
+    fi
+}
+
 run_app() {
     local cmd_opts=""
     [ $DEBUG -eq 1 ] && cmd_opts=$(add_option "$cmd_opts" "DEBUG=1")
@@ -147,6 +160,10 @@ main() {
     fi
 
     export VORTEX_PROFILING=$PERF_CLASS
+
+    if [ "$DRIVER" = "simx" ]; then
+        self_check_softfloat
+    fi
 
     make -C "$ROOT_DIR/hw" config > /dev/null
     make -C "$ROOT_DIR/runtime/stub" > /dev/null

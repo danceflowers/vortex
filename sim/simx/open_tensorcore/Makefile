@@ -24,7 +24,7 @@ DEPS       := $(OBJS:.o=.d)
 # Core headers in this project (for quick visibility)
 HDRS := \
   config_register.h con_to_fp9.h fadd_s1.h fadd_s2.h \
-  fmul_s1.h fmul_s2.h fmul_s3.h fp22_to_fp8.h fp_types.h \
+  fmul_s1.h fmul_s2.h fmul_s3.h fp22_to_fp16.h fp_types.h \
   tc_add_pipe.h tc_mul_add.h tc_mul_pipe.h tensor_core_top.h
 
 CPPFLAGS   ?=
